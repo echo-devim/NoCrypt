@@ -49,6 +49,8 @@ Full example output:
 # insmod nocrypt.ko "max_rename=20" "behaviour_detection=true" "password=n0Cr1pt"
 $ ./example
 [1]    35452 killed     ./example
+# rmmod nocrypt
+rmmod: ERROR: could not remove 'nocrypt': No such file or directory
 # echo -n 'n0Cr1pt' > /sys/kernel/.nocrypt/nocrypt
 # rmmod nocrypt
 # dmesg | grep nocrypt | tail -4                                              
