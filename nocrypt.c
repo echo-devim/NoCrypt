@@ -293,11 +293,11 @@ static bool kill_task(struct task_struct *task) {
 static bool check_rename(char *oldname, char *newname) {
 	struct task_struct *task;
 	task = current;
-	// we use parent pid because the tasks can be threads
-	if (target_pid == task->real_parent->pid) {
+	// we use thread group id because the tasks can be threads
+	if (target_pid == task->tgid) {
 		rename_count++;
 	} else {
-		target_pid = task->real_parent->pid;
+		target_pid = task->tgid;
 		rename_count = 0;
 	}
 	//Check for specific known extensions
