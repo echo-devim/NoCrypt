@@ -49,5 +49,6 @@ Possible improvements that are unlikely will be implemented in this PoC project:
 - Print logs into a internal buffer accessible via sysfs (partially implemented)
 - Hide completely the module from the system, thus attackers won't know if there is installed nocrypt
 - Add more self-protection mechanisms
+- Hook more syscalls, perform more checks
 
 If you use this project or you extend it, please cite or link this repo and its original author.
