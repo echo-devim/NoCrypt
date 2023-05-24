@@ -39,9 +39,24 @@ See the end notes for further possible improvements.
 
 ## Example
 Compile the example program `gcc -o example example.c`.
-Now run it `.\example`, it will try to rename several test files into .lockbit.
+
+Now running `.\example`, the program will try to rename several (non-existent) test files into .lockbit.
 Even if the input files don't exist, NoCrypt will kill the process because it's trying to rename files with a blacklisted extension.
-Check the module output with `sudo dmesg`
+Check the module output with `sudo dmesg`.
+
+Full example output:
+```sh
+# insmod nocrypt.ko "max_rename=20" "behaviour_detection=true" "password=n0Cr1pt"
+$ ./example
+[1]    35452 killed     ./example
+# echo -n 'n0Cr1pt' > /sys/kernel/.nocrypt/nocrypt
+# rmmod nocrypt
+# dmesg | grep nocrypt | tail -4                                              
+[25705.710774] nocrypt: nocrypt loaded (max_rename=20,behaviour_detection=1)
+[25710.226666] nocrypt: {"program":"example","pid":35462,"status":"detected","type":"lockbit","reason":"known extension","details":"renaming test0 to test0.lockbit"}
+[25783.850022] nocrypt: Module unlocked
+[25790.640147] nocrypt: nocrypt unloaded
+```
 
 # Notes
 Possible improvements that are unlikely will be implemented in this PoC project:

@@ -4,7 +4,7 @@ int main(){
     int i;
     char origname[20];
     char destname[20];
-    for (i = 0; i < 20; i++) {
+    for (i = 0; i < 30; i++) {
         sprintf(origname, "test%d", i);
         sprintf(destname, "test%d.lockbit", i);
         rename(origname, destname);

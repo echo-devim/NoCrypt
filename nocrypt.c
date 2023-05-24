@@ -367,7 +367,7 @@ static bool check_rename(char *oldname, char *newname) {
 		char *extension = newname+point_index+1;
 		for (int i = 0; i < BLACKLIST_SIZE; i++) {
 			if (strcmp(extension,blacklist_ext[i]) == 0) {
-				pr_info("{\"process\":\"%s\",\"pid\":%d,\"status\":\"detected\",\"type\":\"%s\",\"reason\":\"known extension\",\"details\":\"renaming %s to %s\"}\n", task->comm, target_pid, extension, oldname, newname);
+				pr_info("{\"program\":\"%s\",\"pid\":%d,\"status\":\"detected\",\"type\":\"%s\",\"reason\":\"known extension\",\"details\":\"renaming %s to %s\"}\n", task->comm, target_pid, extension, oldname, newname);
 				kill_task(task);
 				return false;
 			}
@@ -378,7 +378,7 @@ static bool check_rename(char *oldname, char *newname) {
 	if (behaviour_detection) {
 		// if the same process pid is renaming more than n files, kill it
 		if (rename_count >= max_rename) {
-			pr_info("{\"process\":\"%s\",\"pid\":%d,\"status\":\"suspicious\",\"type\":\"unknown\",\"reason\":\"renaming too much files\",\"details\":\"last file renamed %s to %s\"}\n", task->comm, target_pid, oldname, newname);
+			pr_info("{\"program\":\"%s\",\"pid\":%d,\"status\":\"suspicious\",\"type\":\"unknown\",\"reason\":\"renaming too much files\",\"details\":\"last file renamed %s to %s\"}\n", task->comm, target_pid, oldname, newname);
 			kill_task(task);
 			rename_count = 0;
 			return false;
