@@ -17,22 +17,88 @@
 #include <linux/delay.h>
 #include <linux/sched.h>
 #include <linux/sched/signal.h>
-#include <linux/mm.h>
+#include<linux/sysfs.h>
+#include<linux/rwsem.h>
 
 MODULE_DESCRIPTION("Detect and kill ransomware");
 MODULE_AUTHOR("niveb");
 MODULE_LICENSE("GPL");
 
-unsigned int max_rename = 12;
+static unsigned int max_rename = 12;
 module_param(max_rename, int, 0);
-bool behaviour_detection = false;
+static bool behaviour_detection = false;
 module_param(behaviour_detection, bool, 0);
 
-unsigned int rename_count = 0;
-unsigned int target_pid = 0;
+static unsigned int rename_count = 0;
+static unsigned int target_pid = 0;
 //Add here your custom extensions to block
 #define BLACKLIST_SIZE 7
-char *blacklist_ext[] = {"Clop","iFire","conti","monti","PUUUK", "Cheers","lockbit"};
+static char *blacklist_ext[] = {"Clop","iFire","conti","monti","PUUUK", "Cheers","lockbit"};
+
+// module self-protection (hiding)
+static struct list_head *prev_module;
+
+void hideme(void)
+{
+    prev_module = THIS_MODULE->list.prev;
+    list_del(&THIS_MODULE->list);
+}
+
+void showme(void)
+{
+    list_add(&THIS_MODULE->list, prev_module);
+}
+
+// sysfs
+static bool module_unlocked = false;
+#define MAX_PWD_LEN 100
+static char *password = "n0Cr1pt";
+module_param(password, charp, 0000);
+static char *nocrypt_buf;
+static DECLARE_RWSEM(nocrypt_rwlock);
+static char *pwd_buf;
+static DECLARE_RWSEM(pwd_rwlock);
+static struct kobject *nocrypt_kobj;
+
+static ssize_t nocrypt_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	/* At the moment module logs are stored in kernel message buffer.
+	 * In the future print the log in the internal nocrypt_buf and read it from sysfs
+	 * Example of code:
+	 * down_read(&nocrypt_rwlock);
+	 * strncpy(buf, nocrypt_buf, PAGE_SIZE);
+	 * up_read(&nocrypt_rwlock);
+	 * return PAGE_SIZE;
+	 */
+	return 0;
+}
+
+static ssize_t nocrypt_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	int len;
+	down_write(&pwd_rwlock);
+	memset(pwd_buf, 0, MAX_PWD_LEN);
+	len = (count > MAX_PWD_LEN)? MAX_PWD_LEN: count;
+	strncpy(pwd_buf, buf, len);
+	up_write(&pwd_rwlock);
+	if (strncmp(password, pwd_buf, len) == 0) {
+		module_unlocked = true;
+		showme();
+		pr_info("Module unlocked");
+	}
+	return len;
+}
+
+static struct kobj_attribute nocrypt_attribute = __ATTR(nocrypt, 0600, nocrypt_show, nocrypt_store);
+static struct attribute *attrs[] = {
+	&nocrypt_attribute.attr,
+	NULL,
+};
+static struct attribute_group attr_group = {
+	.attrs = attrs,
+};
+
+
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,7,0)
 static unsigned long lookup_name(const char *name)
@@ -251,22 +317,6 @@ void fh_remove_hooks(struct ftrace_hook *hooks, size_t count)
 #pragma GCC optimize("-fno-optimize-sibling-calls")
 #endif
 
-static char *duplicate_filename(const char __user *filename)
-{
-	char *kernel_filename;
-
-	kernel_filename = kmalloc(4096, GFP_KERNEL);
-	if (!kernel_filename)
-		return NULL;
-
-	if (strncpy_from_user(kernel_filename, filename, 4096) < 0) {
-		kfree(kernel_filename);
-		return NULL;
-	}
-
-	return kernel_filename;
-}
-
 /* Send SIGKILL to the input task */
 static bool kill_task(struct task_struct *task) {
 	int signum = SIGKILL;
@@ -317,7 +367,7 @@ static bool check_rename(char *oldname, char *newname) {
 		char *extension = newname+point_index+1;
 		for (int i = 0; i < BLACKLIST_SIZE; i++) {
 			if (strcmp(extension,blacklist_ext[i]) == 0) {
-				pr_info("%s ransomware detected (renaming %s to %s)\n", extension, oldname, newname);
+				pr_info("{\"process\":\"%s\",\"pid\":%d,\"status\":\"detected\",\"type\":\"%s\",\"reason\":\"known extension\",\"details\":\"renaming %s to %s\"}\n", task->comm, target_pid, extension, oldname, newname);
 				kill_task(task);
 				return false;
 			}
@@ -328,7 +378,7 @@ static bool check_rename(char *oldname, char *newname) {
 	if (behaviour_detection) {
 		// if the same process pid is renaming more than n files, kill it
 		if (rename_count >= max_rename) {
-			pr_info("process %d detected as possible ransomware, renaming too much files (e.g. %s to %s)\n", target_pid, oldname, newname);
+			pr_info("{\"process\":\"%s\",\"pid\":%d,\"status\":\"suspicious\",\"type\":\"unknown\",\"reason\":\"renaming too much files\",\"details\":\"last file renamed %s to %s\"}\n", task->comm, target_pid, oldname, newname);
 			kill_task(task);
 			rename_count = 0;
 			return false;
@@ -384,28 +434,61 @@ static asmlinkage long fh_sys_rename(const char __user *oldname, const char __us
 		.original = (_original),	\
 	}
 
-static struct ftrace_hook demo_hooks[] = {
+static struct ftrace_hook hooks[] = {
 	HOOK("sys_rename", fh_sys_rename, &real_sys_rename),
 };
 
-static int fh_init(void)
+static int nocrypt_init(void)
 {
 	int err;
 
-	err = fh_install_hooks(demo_hooks, ARRAY_SIZE(demo_hooks));
+	err = fh_install_hooks(hooks, ARRAY_SIZE(hooks));
 	if (err)
 		return err;
 
+	// Create "nocrypt" kobject
+	nocrypt_kobj = kobject_create_and_add(".nocrypt", kernel_kobj);
+	if (!nocrypt_kobj)
+		return -ENOMEM;
+
+	// Allocate space for nocrypt_buf and pwd_buf
+	nocrypt_buf = (char*) kzalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!nocrypt_buf) {
+		pr_err("Cannot allocate memory for nocrypt buffer\n");
+		kobject_put(nocrypt_kobj);
+		return -ENOMEM;
+	}
+	pwd_buf = (char*) kzalloc(MAX_PWD_LEN, GFP_KERNEL);
+	if (!pwd_buf) {
+		pr_err("Cannot allocate memory for password buffer\n");
+		kfree(nocrypt_buf);
+		kobject_put(nocrypt_kobj);
+		return -ENOMEM;
+	}
+
+	err = sysfs_create_group(nocrypt_kobj, &attr_group);
+	if (err) {
+		pr_err("Cannot register sysfs attribute group\n");
+		kfree(nocrypt_buf);
+		kfree(pwd_buf);
+		kobject_put(nocrypt_kobj);
+	}
+
+	hideme();
 	pr_info("nocrypt loaded (max_rename=%d,behaviour_detection=%d)\n",max_rename,behaviour_detection);
 
 	return 0;
 }
-module_init(fh_init);
+module_init(nocrypt_init);
 
-static void fh_exit(void)
+static void nocrypt_exit(void)
 {
-	fh_remove_hooks(demo_hooks, ARRAY_SIZE(demo_hooks));
+	fh_remove_hooks(hooks, ARRAY_SIZE(hooks));
+	kfree(nocrypt_buf);
+	kfree(pwd_buf);
+	// Remove kobject
+	kobject_put(nocrypt_kobj);
 
 	pr_info("nocrypt unloaded\n");
 }
-module_exit(fh_exit);
+module_exit(nocrypt_exit);
